@@ -78,13 +78,13 @@ public:
   AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) ;
   ~AstraDriver();
 
-private:
+protected:
   typedef astra_camera::AstraConfig Config;
   typedef dynamic_reconfigure::Server<Config> ReconfigureServer;
 
-  void newIRFrameCallback(sensor_msgs::ImagePtr image);
-  void newColorFrameCallback(sensor_msgs::ImagePtr image);
-  void newDepthFrameCallback(sensor_msgs::ImagePtr image);
+  virtual void newIRFrameCallback(sensor_msgs::ImagePtr image);
+  virtual void newColorFrameCallback(sensor_msgs::ImagePtr image);
+  virtual void newDepthFrameCallback(sensor_msgs::ImagePtr image);
 
   // Methods to get calibration parameters for the various cameras
   sensor_msgs::CameraInfoPtr getDefaultCameraInfo(int width, int height, double f) const;

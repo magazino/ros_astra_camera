@@ -67,7 +67,7 @@ generate_messages(
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES astra_wrapper
+  LIBRARIES astra_wrapper astra_driver_lib
   CATKIN_DEPENDS camera_info_manager dynamic_reconfigure image_transport nodelet sensor_msgs roscpp message_runtime
   #DEPENDS libastra
 )
@@ -163,9 +163,9 @@ install(DIRECTORY include/openni2_redist/${HOST_PLATFORM}/OpenNI2
   DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}/
 )
 
-#install(DIRECTORY include/${PROJECT_NAME}/
-#  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
-#)
+install(DIRECTORY include/${PROJECT_NAME} include/openni2 include/libuvc_camera
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
 
 # add xml file
 install(FILES astra_nodelets.xml
@@ -184,7 +184,7 @@ install(FILES 56-orbbec-usb.rules
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-install(DIRECTORY scripts
+install(DIRECTORY scripts launch
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
