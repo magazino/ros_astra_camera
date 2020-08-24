@@ -151,6 +151,16 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   }
   ROS_DEBUG("Dynamic reconfigure configuration received.");
 
+  ros::NodeHandle color_nh(nh_, "rgb");
+  color_action_server_ = boost::make_shared<ImageActionServer>(
+      color_nh, "grab_images", boost::bind(&AstraDriver::colorGrabImagesCallback, this, _1), false);
+  color_action_server_->start();
+
+  ros::NodeHandle depth_nh(nh_, "depth");
+  depth_action_server_ = boost::make_shared<ImageActionServer>(
+      depth_nh, "grab_images", boost::bind(&AstraDriver::depthGrabImagesCallback, this, _1), false);
+  depth_action_server_->start();
+
   advertiseROSTopics();
 }
 
@@ -464,6 +474,176 @@ void AstraDriver::setDepthVideoMode(const AstraVideoMode& depth_video_mode)
   }
 }
 
+bool AstraDriver::validateGrabImagesGoal(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
+{
+  if (goal->exposure_given and goal->gain_given)
+  {
+    if (goal->exposure_times.size() != goal->gain_values.size())
+    {
+      return false;
+    }
+  }
+  return true;
+}
+
+void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
+{
+  // Only the auto exposure, exposure and gain parameters of the goal are used
+  if (goal->exposure_given or goal->gain_given)
+  {
+    ROS_WARN_ONCE("Received goal with gamma or brightness given. These values "
+                  "are not supported and will be ignored!");
+  }
+
+  imageConnectCb(); // Connect (in case there are no subscribers)
+  ///CameraParameters old_parameters = getCameraParameters(); // Backup parameters
+
+  camera_control_msgs::GrabImagesResult result;
+
+  if (not validateGrabImagesGoal(goal))
+  {
+    color_action_server_->setAborted(result, "Invalid goal");
+    return;
+  }
+
+  device_->setAutoExposure(goal->exposure_auto);
+
+  // TODO Check parameter units and transform parameters if necessary (orbbec
+  // doesn't provide any info on this)
+
+  actionlib_msgs::GoalStatus goal_status;
+  goal_status.status = actionlib_msgs::GoalStatus::SUCCEEDED;
+  camera_control_msgs::GrabImagesFeedback feedback;
+  size_t num_imgs =
+      std::max((size_t)1, std::max(goal->exposure_times.size(), goal->gain_values.size()));
+  for (size_t i = 0; i < num_imgs; ++i)
+  {
+    if (color_action_server_->isPreemptRequested())
+    {
+      goal_status.status = actionlib_msgs::GoalStatus::PREEMPTED;
+      break;
+    }
+
+    // Set parameters
+    if (goal->exposure_given)
+    {
+      device_->setIRExposure(static_cast<int>(goal->exposure_times[i]));
+    }
+    if (goal->gain_given)
+    {
+      device_->setIRGain(static_cast<int>(goal->gain_values[i]));
+    }
+
+    // Get image
+    boost::mutex::scoped_lock lock(color_syncer_.mutex);
+    color_syncer_.reset(true);
+    bool got_image = color_syncer_.cv.wait_for(
+        lock, boost::chrono::seconds(1), boost::bind(&ActionImageSyncer::ready, &color_syncer_));
+    if (not got_image)
+    {
+      ROS_WARN("Failed to grab images; color stream is unresponsive");
+      break;
+    }
+    result.images.push_back(*color_syncer_.image);
+
+    // Get parameters
+    result.reached_exposure_times.push_back(device_->getIRExposure());
+    result.reached_gain_values.push_back(device_->getIRGain());
+    result.reached_brightness_values.push_back(NAN);
+    result.reached_gamma_values.push_back(NAN);
+
+    // Send feedback
+    ++feedback.curr_nr_images_taken;
+    color_action_server_->publishFeedback(feedback);
+  }
+
+  // Finalize result
+  // Todo use empty()
+  if (result.images.size() != 0)
+  {
+    sensor_msgs::Image image = result.images.front();
+    result.cam_info = *getColorCameraInfo(image.width, image.height, image.header.stamp);
+  }
+  result.success = result.images.size() == num_imgs;
+
+  // Send result
+  switch (goal_status.status)
+  {
+    case actionlib_msgs::GoalStatus::SUCCEEDED:
+      color_action_server_->setSucceeded(result, "OK");
+      break;
+    case actionlib_msgs::GoalStatus::PREEMPTED:
+      color_action_server_->setPreempted(result, "Preemption requested");
+      break;
+  }
+
+  ///setCameraParameters(old_parameters); // Restore parameters
+  imageConnectCb();                    // Disconnect (in case there are no subscribers)
+}
+
+void AstraDriver::depthGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
+{
+  depthConnectCb(); // Connect (in case there are no subscribers)
+  camera_control_msgs::GrabImagesResult result;
+
+  if (goal->exposure_given or goal->gain_given or goal->gamma_given or goal->brightness_given)
+  {
+    ROS_WARN_ONCE("Reveived goal with exposure, gain, gamma, or brightness given. "
+                  "These values are not supported and will be ignored!");
+  }
+
+  if (not validateGrabImagesGoal(goal))
+  {
+    depth_action_server_->setAborted(result, "Invalid goal");
+    return;
+  }
+
+  if (depth_action_server_->isPreemptRequested())
+  {
+    depth_action_server_->setPreempted(result, "Preemption requested");
+    return;
+  }
+
+  // Get image
+  boost::mutex::scoped_lock lock(depth_syncer_.mutex);
+  depth_syncer_.reset(true);
+  bool got_image = depth_syncer_.cv.wait_for(
+      lock, boost::chrono::seconds(1), boost::bind(&ActionImageSyncer::ready, &depth_syncer_));
+  if (not got_image)
+  {
+    ROS_WARN("Failed to grab image; depth stream is unresponsive");
+  }
+  else
+  {
+    result.images.push_back(*depth_syncer_.image);
+
+    // Set parameters
+    result.reached_exposure_times.push_back(NAN);
+    result.reached_gain_values.push_back(NAN);
+    result.reached_brightness_values.push_back(NAN);
+    result.reached_gamma_values.push_back(NAN);
+
+    // Send feedback
+    camera_control_msgs::GrabImagesFeedback feedback;
+    feedback.curr_nr_images_taken = 1;
+    depth_action_server_->publishFeedback(feedback);
+  }
+
+  // Finalize result
+  // Todo use empty
+  if (result.images.size() != 0)
+  {
+    sensor_msgs::Image image = result.images.front();
+    result.cam_info = *getDepthCameraInfo(image.width, image.height, image.header.stamp);
+  }
+  result.success = result.images.size() == 1;
+
+  // Send result
+  depth_action_server_->setSucceeded(result, "OK");
+
+  depthConnectCb(); // Disconnect (in case there are no subscribers)
+}
+
 void AstraDriver::applyConfigToOpenNIDevice()
 {
 
@@ -631,14 +811,20 @@ void AstraDriver::newIRFrameCallback(sensor_msgs::ImagePtr image)
 
 void AstraDriver::newColorFrameCallback(sensor_msgs::ImagePtr image)
 {
+  boost::mutex::scoped_lock lock(color_syncer_.mutex);
+
   if ((++data_skip_color_counter_)%data_skip_==0)
   {
     data_skip_color_counter_ = 0;
 
-    if (color_subscribers_)
+    if (color_subscribers_ or color_syncer_.need_image)
     {
       image->header.frame_id = color_frame_id_;
       image->header.stamp = image->header.stamp + color_time_offset_;
+
+      color_syncer_.image = image;
+      color_syncer_.check();
+      color_syncer_.cv.notify_one();
 
       pub_color_.publish(image, getColorCameraInfo(image->width, image->height, image->header.stamp));
     }
@@ -647,12 +833,14 @@ void AstraDriver::newColorFrameCallback(sensor_msgs::ImagePtr image)
 
 void AstraDriver::newDepthFrameCallback(sensor_msgs::ImagePtr image)
 {
+  boost::mutex::scoped_lock lock(depth_syncer_.mutex);
+
   if ((++data_skip_depth_counter_)%data_skip_==0)
   {
 
     data_skip_depth_counter_ = 0;
 
-    if (depth_raw_subscribers_||depth_subscribers_||projector_info_subscribers_)
+    if (depth_raw_subscribers_ || depth_subscribers_ || projector_info_subscribers_ || depth_syncer_.need_image)
     {
       image->header.stamp = image->header.stamp + depth_time_offset_;
 
@@ -682,6 +870,10 @@ void AstraDriver::newDepthFrameCallback(sensor_msgs::ImagePtr image)
         image->header.frame_id = depth_frame_id_;
       }
       cam_info = getDepthCameraInfo(image->width, image->height, image->header.stamp);
+
+      depth_syncer_.image = image;
+      depth_syncer_.check();
+      depth_syncer_.cv.notify_one();
 
       if (depth_raw_subscribers_)
       {
