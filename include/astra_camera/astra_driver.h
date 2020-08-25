@@ -75,6 +75,12 @@
 namespace astra_wrapper
 {
 
+typedef struct
+{
+  int exposure;
+  int gain;
+  bool auto_exposure;
+} CameraParameters;
 /**
  * @brief The ActionImageSyncer struct
  * @note When the change in a parameter of the camera is big, the camera is
@@ -281,8 +287,8 @@ private:
   void colorGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr& goal);
   void depthGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr& goal);
 
-  ///CameraParameters getCameraParameters() const;
-  ///void setCameraParameters(const CameraParameters &parameters);
+  CameraParameters getCameraParameters() const;
+  void setCameraParameters(const CameraParameters &parameters);
 
   ImageActionServerPtr color_action_server_;
   ImageActionServerPtr depth_action_server_;

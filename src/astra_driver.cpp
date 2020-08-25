@@ -496,7 +496,7 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
   }
 
   imageConnectCb(); // Connect (in case there are no subscribers)
-  ///CameraParameters old_parameters = getCameraParameters(); // Backup parameters
+  CameraParameters old_parameters = getCameraParameters(); // Backup parameters
 
   camera_control_msgs::GrabImagesResult result;
 
@@ -577,7 +577,7 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
       break;
   }
 
-  ///setCameraParameters(old_parameters); // Restore parameters
+  setCameraParameters(old_parameters); // Restore parameters
   imageConnectCb();                    // Disconnect (in case there are no subscribers)
 }
 
@@ -642,6 +642,22 @@ void AstraDriver::depthGrabImagesCallback(const camera_control_msgs::GrabImagesG
   depth_action_server_->setSucceeded(result, "OK");
 
   depthConnectCb(); // Disconnect (in case there are no subscribers)
+}
+
+CameraParameters AstraDriver::getCameraParameters() const
+{
+  CameraParameters parameters;
+  parameters.exposure = device_->getIRExposure();
+  parameters.gain = device_->getIRGain();
+  parameters.auto_exposure = device_->getAutoExposure();
+  return parameters;
+}
+
+void AstraDriver::setCameraParameters(const CameraParameters &parameters)
+{
+  device_->setIRExposure(parameters.exposure);
+  device_->setIRGain(parameters.gain);
+  device_->setAutoExposure(parameters.auto_exposure);
 }
 
 void AstraDriver::applyConfigToOpenNIDevice()
