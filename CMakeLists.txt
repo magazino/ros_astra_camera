@@ -132,6 +132,10 @@ target_link_libraries(astra_list_devices astra_wrapper)
 
 add_executable(astra_test_wrapper test/test_wrapper.cpp )
 target_link_libraries(astra_test_wrapper astra_wrapper ${Boost_LIBRARIES})
+
+add_executable(action_image_client test/action_image_client.cpp)
+target_link_libraries(action_image_client ${catkin_LIBRARIES} ${Boost_LIBRARIES})
+
 if (UNIX AND NOT APPLE)
   add_executable(astra_usb_reset src/usb_reset.c)
   set(ADDITIONAL_EXECUTABLES "astra_usb_reset")
@@ -149,7 +153,7 @@ add_library(libuvc_camera_nodelet src/libuvc_camera/nodelet.cpp
 target_link_libraries(libuvc_camera_nodelet ${libuvc_LIBRARIES} ${Boost_LIBRARIES} ${catkin_LIBRARIES})
 add_dependencies(libuvc_camera_nodelet ${PROJECT_NAME}_gencfg ${PROJECT_NAME}_generate_messages_cpp)
 
-install(TARGETS astra_wrapper astra_camera_nodelet astra_camera_node astra_list_devices astra_driver_lib ${ADDITIONAL_EXECUTABLES}
+install(TARGETS astra_wrapper action_image_client astra_camera_nodelet astra_camera_node astra_list_devices astra_driver_lib ${ADDITIONAL_EXECUTABLES}
   ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
