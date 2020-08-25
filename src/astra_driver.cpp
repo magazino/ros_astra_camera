@@ -193,22 +193,22 @@ void AstraDriver::advertiseROSTopics()
   //ROS_WARN("-------------has color sensor is %d----------- ", device_->hasColorSensor());
   if (device_->hasColorSensor())
   {
-    image_transport::SubscriberStatusCallback itssc = boost::bind(&AstraDriver::imageConnectCb, this);
-    ros::SubscriberStatusCallback rssc = boost::bind(&AstraDriver::imageConnectCb, this);
+    image_transport::SubscriberStatusCallback itssc = boost::bind(&AstraDriver::imageConnectCb, this, false);
+    ros::SubscriberStatusCallback rssc = boost::bind(&AstraDriver::imageConnectCb, this, false);
     pub_color_ = color_it.advertiseCamera("image", 1, itssc, itssc, rssc, rssc);
   }
 
   if (device_->hasIRSensor())
   {
-    image_transport::SubscriberStatusCallback itssc = boost::bind(&AstraDriver::imageConnectCb, this);
-    ros::SubscriberStatusCallback rssc = boost::bind(&AstraDriver::imageConnectCb, this);
+    image_transport::SubscriberStatusCallback itssc = boost::bind(&AstraDriver::imageConnectCb, this, false);
+    ros::SubscriberStatusCallback rssc = boost::bind(&AstraDriver::imageConnectCb, this, false);
     pub_ir_ = ir_it.advertiseCamera("image", 1, itssc, itssc, rssc, rssc);
   }
 
   if (device_->hasDepthSensor())
   {
-    image_transport::SubscriberStatusCallback itssc = boost::bind(&AstraDriver::depthConnectCb, this);
-    ros::SubscriberStatusCallback rssc = boost::bind(&AstraDriver::depthConnectCb, this);
+    image_transport::SubscriberStatusCallback itssc = boost::bind(&AstraDriver::depthConnectCb, this, false);
+    ros::SubscriberStatusCallback rssc = boost::bind(&AstraDriver::depthConnectCb, this, false);
     pub_depth_raw_ = depth_it.advertiseCamera("image_raw", 1, itssc, itssc, rssc, rssc);
     pub_depth_ = depth_raw_it.advertiseCamera("image", 1, itssc, itssc, rssc, rssc);
     pub_projector_info_ = projector_nh.advertise<sensor_msgs::CameraInfo>("camera_info", 1, rssc, rssc);
@@ -495,7 +495,7 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
                   "are not supported and will be ignored!");
   }
 
-  imageConnectCb(); // Connect (in case there are no subscribers)
+  imageConnectCb(true); // Connect (in case there are no subscribers)
   CameraParameters old_parameters = getCameraParameters(); // Backup parameters
 
   camera_control_msgs::GrabImagesResult result;
@@ -583,7 +583,7 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
 
 void AstraDriver::depthGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
 {
-  depthConnectCb(); // Connect (in case there are no subscribers)
+  depthConnectCb(true); // Connect (in case there are no subscribers)
   camera_control_msgs::GrabImagesResult result;
 
   if (goal->exposure_given or goal->gain_given or goal->gamma_given or goal->brightness_given)
@@ -721,7 +721,7 @@ void AstraDriver::applyConfigToOpenNIDevice()
 
 }
 
-void AstraDriver::imageConnectCb()
+void AstraDriver::imageConnectCb(bool grab_image_client_)
 {
   boost::lock_guard<boost::mutex> lock(connect_mutex_);
 
@@ -731,7 +731,7 @@ void AstraDriver::imageConnectCb()
   ir_subscribers_ = pub_ir_.getNumSubscribers() > 0;
   color_subscribers_ = pub_color_.getNumSubscribers() > 0;
 
-  if (color_subscribers_ && (!ir_subscribers_ || rgb_preferred_))
+  if ((color_subscribers_ || grab_image_client_) && (!ir_subscribers_ || rgb_preferred_))
   {
     if (ir_subscribers_)
       ROS_ERROR("Cannot stream RGB and IR at the same time. Streaming RGB only.");
@@ -785,7 +785,7 @@ void AstraDriver::imageConnectCb()
   }
 }
 
-void AstraDriver::depthConnectCb()
+void AstraDriver::depthConnectCb(bool grab_image_client_)
 {
   boost::lock_guard<boost::mutex> lock(connect_mutex_);
 
@@ -793,7 +793,7 @@ void AstraDriver::depthConnectCb()
   depth_raw_subscribers_ = pub_depth_raw_.getNumSubscribers() > 0;
   projector_info_subscribers_ = pub_projector_info_.getNumSubscribers() > 0;
 
-  bool need_depth = depth_subscribers_ || depth_raw_subscribers_;
+  bool need_depth = depth_subscribers_ || depth_raw_subscribers_ || grab_image_client_;
 
   if (need_depth && !device_->isDepthStreamStarted())
   {

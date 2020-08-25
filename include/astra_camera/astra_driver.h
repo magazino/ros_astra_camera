@@ -166,8 +166,8 @@ private:
 
   void advertiseROSTopics();
 
-  void imageConnectCb();
-  void depthConnectCb();
+  void imageConnectCb(bool grab_image_client_ = false);
+  void depthConnectCb(bool grab_image_client_ = false);
 
   bool getSerialCb(astra_camera::GetSerialRequest& req, astra_camera::GetSerialResponse& res);
   bool getDeviceTypeCb(astra_camera::GetDeviceTypeRequest& req, astra_camera::GetDeviceTypeResponse& res);
