@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(astra_camera)
 
-find_package(catkin REQUIRED actionlib camera_control_msgs camera_info_manager dynamic_reconfigure image_transport nodelet sensor_msgs roscpp message_generation)
+find_package(catkin REQUIRED actionlib camera_control_msgs camera_info_manager diagnostic_updater dynamic_reconfigure image_transport nodelet sensor_msgs roscpp message_generation)
 
 find_package(Boost REQUIRED COMPONENTS system thread)
 
@@ -68,7 +68,7 @@ generate_messages(
 catkin_package(
   INCLUDE_DIRS include
   LIBRARIES astra_wrapper
-  CATKIN_DEPENDS camera_info_manager actionlib camera_control_msgs dynamic_reconfigure image_transport nodelet sensor_msgs roscpp message_runtime
+  CATKIN_DEPENDS camera_info_manager actionlib camera_control_msgs diagnostic_updater dynamic_reconfigure image_transport nodelet sensor_msgs roscpp message_runtime
   #DEPENDS libastra
 )
 
@@ -188,7 +188,7 @@ install(FILES 56-orbbec-usb.rules
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-install(DIRECTORY scripts launch
+install(DIRECTORY launch scripts 
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 

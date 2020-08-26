@@ -44,6 +44,8 @@
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/thread/thread.hpp>
 
+using diagnostic_msgs::DiagnosticStatus;
+
 #define  MULTI_ASTRA 1
 namespace astra_wrapper
 {
@@ -62,7 +64,6 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
     depth_raw_subscribers_(false),
     uvc_flip_(0)
 {
-
   genVideoModeTableMap();
 
   readConfigFromParameterServer();
@@ -151,6 +152,14 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   }
   ROS_DEBUG("Dynamic reconfigure configuration received.");
 
+  advertiseROSTopics();
+
+  diagnostics_updater_.verbose_ = false;
+  diagnostics_updater_.setHardwareID("astra_" + serial_number_);
+  diagnostics_updater_.add("camera_availability", this, &AstraDriver::getAvailabilityDiagnostic);
+  diagnostics_timer_ =
+      pnh.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
+
   ros::NodeHandle color_nh(nh_, "rgb");
   color_action_server_ = boost::make_shared<ImageActionServer>(
       color_nh, "grab_images", boost::bind(&AstraDriver::colorGrabImagesCallback, this, _1), false);
@@ -160,12 +169,106 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   depth_action_server_ = boost::make_shared<ImageActionServer>(
       depth_nh, "grab_images", boost::bind(&AstraDriver::depthGrabImagesCallback, this, _1), false);
   depth_action_server_->start();
-
-  advertiseROSTopics();
 }
 
 AstraDriver::~AstraDriver() {
   device_->stopAllStreams();
+}
+
+void AstraDriver::getAvailabilityDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat)
+{
+  size_t device_count = device_manager_->getNumOfConnectedDevices();
+
+  if (device_count == 0)
+  {
+    stat.summary(DiagnosticStatus::ERROR, "No Device connected");
+    ROS_WARN("NO DEVICE CONNECTED, RESTARTING");
+
+    device_.reset();
+
+    terminateROSTopics();
+    initDevice(); // blocking
+  }
+  else
+  {
+    stat.summary(DiagnosticStatus::OK, "Device is connected");
+  }
+
+  std::string uri;
+
+  // get uri for serial number (changes after losing connection)
+  boost::shared_ptr<std::vector<AstraDeviceInfo> > infos = device_manager_->getConnectedDeviceInfos();
+  for (size_t i = 0; i < infos->size(); ++i)
+  {
+    std::string serial = device_manager_->getSerial((*infos)[i].uri_);
+    ROS_DEBUG("URI: %s, serial: %s", (*infos)[i].uri_.c_str(), serial.c_str());
+    if (serial == serial_number_)
+    {
+      uri = (*infos)[i].uri_;
+      break;
+    }
+  }
+
+  if (uri.empty())
+  {
+    ROS_INFO("Could not find uri for serial_number '%s'", serial_number_.c_str());
+    stat.summary(DiagnosticStatus::ERROR, "No Device connected");
+    return;
+  }
+
+  // we have a uri for a camera with the right serial number
+  stat.summary(DiagnosticStatus::OK, "Device is connected");
+
+  if (device_uri_.empty())
+  {
+    // first connection
+    device_uri_ = uri;
+    return;
+  }
+
+  // camera was reconnected and gets an incremented URI
+  if (device_uri_ != uri)
+  {
+    ROS_WARN("DEVICE URI CHANGED from '%s' to '%s'", device_uri_.c_str(), uri.c_str());
+    device_.reset();
+
+    terminateROSTopics();
+    initDevice();
+
+    config_init_ = false;
+    applyConfigToOpenNIDevice();
+    config_init_ = true;
+
+    device_uri_ = uri;
+  } 
+}
+
+void AstraDriver::diagnosticsTimerCallback(const ros::TimerEvent &)
+{
+  diagnostics_updater_.update();
+}
+
+void AstraDriver::terminateROSTopics()
+{
+  pub_color_.shutdown();
+  pub_ir_.shutdown();
+  pub_depth_.shutdown();
+  pub_depth_raw_.shutdown();
+  pub_projector_info_.shutdown();
+  color_info_manager_.reset();
+  ir_info_manager_.reset();
+  get_serial_server.shutdown();
+  get_device_type_server.shutdown();
+  get_ir_gain_server.shutdown();
+  set_ir_gain_server.shutdown();
+  get_ir_exposure_server.shutdown(); 
+  set_ir_exposure_server.shutdown(); 
+  set_ir_flood_server.shutdown(); 
+  set_laser_server.shutdown(); 
+  set_ldp_server.shutdown(); 
+  reset_ir_gain_server.shutdown(); 
+  reset_ir_exposure_server.shutdown(); 
+  get_camera_info.shutdown(); 
 }
 
 void AstraDriver::advertiseROSTopics()
@@ -224,11 +327,10 @@ void AstraDriver::advertiseROSTopics()
 
   // The camera names are set to [rgb|depth]_[serial#], e.g. depth_B00367707227042B.
   // camera_info_manager substitutes this for ${NAME} in the URL.
-  std::string serial_number = device_->getStringID();
   std::string color_name, ir_name;
 
-  color_name = "rgb_"   + serial_number;
-  ir_name  = "depth_" + serial_number;
+  color_name = "rgb_"   + serial_number_;
+  ir_name  = "depth_" + serial_number_;
 
   // Load the saved calibrations, if they exist
   color_info_manager_ = boost::make_shared<camera_info_manager::CameraInfoManager>(color_nh, color_name, color_info_url_);
@@ -476,7 +578,7 @@ void AstraDriver::setDepthVideoMode(const AstraVideoMode& depth_video_mode)
 
 bool AstraDriver::validateGrabImagesGoal(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
 {
-  if (goal->exposure_given and goal->gain_given)
+  if (goal->exposure_given && goal->gain_given)
   {
     if (goal->exposure_times.size() != goal->gain_values.size())
     {
@@ -488,23 +590,22 @@ bool AstraDriver::validateGrabImagesGoal(const camera_control_msgs::GrabImagesGo
 
 void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
 {
+  camera_control_msgs::GrabImagesResult result;
   // Only the auto exposure, exposure and gain parameters of the goal are used
-  if (goal->exposure_given or goal->gain_given)
+  if (goal->exposure_given || goal->gain_given)
   {
     ROS_WARN_ONCE("Received goal with gamma or brightness given. These values "
                   "are not supported and will be ignored!");
   }
 
-  imageConnectCb(true); // Connect (in case there are no subscribers)
-  CameraParameters old_parameters = getCameraParameters(); // Backup parameters
-
-  camera_control_msgs::GrabImagesResult result;
-
-  if (not validateGrabImagesGoal(goal))
+  if (!validateGrabImagesGoal(goal))
   {
     color_action_server_->setAborted(result, "Invalid goal");
     return;
   }
+
+  imageConnectCb(true); // Connect (in case there are no subscribers)
+  CameraParameters old_parameters = getCameraParameters(); // Backup parameters
 
   device_->setAutoExposure(goal->exposure_auto);
 
@@ -539,7 +640,7 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
     color_syncer_.reset(true);
     bool got_image = color_syncer_.cv.wait_for(
         lock, boost::chrono::seconds(1), boost::bind(&ActionImageSyncer::ready, &color_syncer_));
-    if (not got_image)
+    if (!got_image)
     {
       ROS_WARN("Failed to grab images; color stream is unresponsive");
       break;
@@ -558,13 +659,13 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
   }
 
   // Finalize result
-  // Todo use empty()
-  if (result.images.size() != 0)
+  if (!result.images.empty())
   {
-    sensor_msgs::Image image = result.images.front();
+    const sensor_msgs::Image& image = result.images.front();
     result.cam_info = *getColorCameraInfo(image.width, image.height, image.header.stamp);
   }
   result.success = result.images.size() == num_imgs;
+  if (!result.success) goal_status.status = actionlib_msgs::GoalStatus::ABORTED;
 
   // Send result
   switch (goal_status.status)
@@ -575,32 +676,41 @@ void AstraDriver::colorGrabImagesCallback(const camera_control_msgs::GrabImagesG
     case actionlib_msgs::GoalStatus::PREEMPTED:
       color_action_server_->setPreempted(result, "Preemption requested");
       break;
+    case actionlib_msgs::GoalStatus::ABORTED:
+      color_action_server_->setAborted(result, "Abortion requested");
+      break;
   }
 
+  color_syncer_.image.reset();
   setCameraParameters(old_parameters); // Restore parameters
   imageConnectCb();                    // Disconnect (in case there are no subscribers)
 }
 
 void AstraDriver::depthGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr &goal)
 {
-  depthConnectCb(true); // Connect (in case there are no subscribers)
+  
   camera_control_msgs::GrabImagesResult result;
+  actionlib_msgs::GoalStatus goal_status;
+  goal_status.status = actionlib_msgs::GoalStatus::SUCCEEDED;
 
-  if (goal->exposure_given or goal->gain_given or goal->gamma_given or goal->brightness_given)
+  if (goal->exposure_given || goal->gain_given || goal->gamma_given || goal->brightness_given)
   {
-    ROS_WARN_ONCE("Reveived goal with exposure, gain, gamma, or brightness given. "
+    ROS_WARN_ONCE("Received goal with exposure, gain, gamma, or brightness given. "
                   "These values are not supported and will be ignored!");
   }
 
-  if (not validateGrabImagesGoal(goal))
+  if (!validateGrabImagesGoal(goal))
   {
     depth_action_server_->setAborted(result, "Invalid goal");
     return;
   }
 
+  depthConnectCb(true); // Connect (in case there are no subscribers)
+
   if (depth_action_server_->isPreemptRequested())
   {
     depth_action_server_->setPreempted(result, "Preemption requested");
+    depthConnectCb(); // Disconnect
     return;
   }
 
@@ -609,12 +719,20 @@ void AstraDriver::depthGrabImagesCallback(const camera_control_msgs::GrabImagesG
   depth_syncer_.reset(true);
   bool got_image = depth_syncer_.cv.wait_for(
       lock, boost::chrono::seconds(1), boost::bind(&ActionImageSyncer::ready, &depth_syncer_));
-  if (not got_image)
+  if (!got_image)
   {
     ROS_WARN("Failed to grab image; depth stream is unresponsive");
   }
   else
   {
+    if (depth_action_server_->isPreemptRequested())
+    {
+      depth_action_server_->setPreempted(result, "Preemption requested");
+      depth_syncer_.image.reset();
+      depthConnectCb(); // Disconnect
+      return;
+    }
+
     result.images.push_back(*depth_syncer_.image);
 
     // Set parameters
@@ -630,17 +748,26 @@ void AstraDriver::depthGrabImagesCallback(const camera_control_msgs::GrabImagesG
   }
 
   // Finalize result
-  // Todo use empty
-  if (result.images.size() != 0)
+  if (!result.images.empty())
   {
-    sensor_msgs::Image image = result.images.front();
+    const sensor_msgs::Image& image = result.images.front();
     result.cam_info = *getDepthCameraInfo(image.width, image.height, image.header.stamp);
   }
   result.success = result.images.size() == 1;
+  if (!result.success) goal_status.status = actionlib_msgs::GoalStatus::ABORTED;
 
   // Send result
-  depth_action_server_->setSucceeded(result, "OK");
+  switch (goal_status.status)
+  {
+    case actionlib_msgs::GoalStatus::SUCCEEDED:
+      depth_action_server_->setSucceeded(result, "OK");
+      break;
+    case actionlib_msgs::GoalStatus::ABORTED:
+      depth_action_server_->setAborted(result, "Abortion requested");
+      break;
+  }
 
+  depth_syncer_.image.reset();
   depthConnectCb(); // Disconnect (in case there are no subscribers)
 }
 
@@ -721,7 +848,7 @@ void AstraDriver::applyConfigToOpenNIDevice()
 
 }
 
-void AstraDriver::imageConnectCb(bool grab_image_client_)
+void AstraDriver::imageConnectCb(bool grab_images_client)
 {
   boost::lock_guard<boost::mutex> lock(connect_mutex_);
 
@@ -731,7 +858,7 @@ void AstraDriver::imageConnectCb(bool grab_image_client_)
   ir_subscribers_ = pub_ir_.getNumSubscribers() > 0;
   color_subscribers_ = pub_color_.getNumSubscribers() > 0;
 
-  if ((color_subscribers_ || grab_image_client_) && (!ir_subscribers_ || rgb_preferred_))
+  if ((color_subscribers_ || grab_images_client) && (!ir_subscribers_ || rgb_preferred_))
   {
     if (ir_subscribers_)
       ROS_ERROR("Cannot stream RGB and IR at the same time. Streaming RGB only.");
@@ -744,6 +871,7 @@ void AstraDriver::imageConnectCb(bool grab_image_client_)
 
     if (!color_started)
     {
+      
       device_->setColorFrameCallback(boost::bind(&AstraDriver::newColorFrameCallback, this, _1));
 
       ROS_INFO("Starting color stream.");
@@ -785,7 +913,7 @@ void AstraDriver::imageConnectCb(bool grab_image_client_)
   }
 }
 
-void AstraDriver::depthConnectCb(bool grab_image_client_)
+void AstraDriver::depthConnectCb(bool grab_images_client)
 {
   boost::lock_guard<boost::mutex> lock(connect_mutex_);
 
@@ -793,7 +921,7 @@ void AstraDriver::depthConnectCb(bool grab_image_client_)
   depth_raw_subscribers_ = pub_depth_raw_.getNumSubscribers() > 0;
   projector_info_subscribers_ = pub_projector_info_.getNumSubscribers() > 0;
 
-  bool need_depth = depth_subscribers_ || depth_raw_subscribers_ || grab_image_client_;
+  bool need_depth = depth_subscribers_ || depth_raw_subscribers_ || grab_images_client;
 
   if (need_depth && !device_->isDepthStreamStarted())
   {
@@ -827,34 +955,38 @@ void AstraDriver::newIRFrameCallback(sensor_msgs::ImagePtr image)
 
 void AstraDriver::newColorFrameCallback(sensor_msgs::ImagePtr image)
 {
-  boost::mutex::scoped_lock lock(color_syncer_.mutex);
-
   if ((++data_skip_color_counter_)%data_skip_==0)
   {
     data_skip_color_counter_ = 0;
-
-    if (color_subscribers_ or color_syncer_.need_image)
+    boost::mutex::scoped_lock lock(color_syncer_.mutex);
+    
+    if (color_subscribers_ || color_syncer_.need_image)
     {
       image->header.frame_id = color_frame_id_;
       image->header.stamp = image->header.stamp + color_time_offset_;
 
-      color_syncer_.image = image;
-      color_syncer_.check();
-      color_syncer_.cv.notify_one();
+      if (color_syncer_.need_image) 
+      {
+        color_syncer_.image = image;
+        color_syncer_.check();
+        lock.unlock();
+        color_syncer_.cv.notify_one();
+      }
 
-      pub_color_.publish(image, getColorCameraInfo(image->width, image->height, image->header.stamp));
+      if (color_subscribers_)
+      {
+        pub_color_.publish(image, getColorCameraInfo(image->width, image->height, image->header.stamp));
+      }
     }
   }
 }
 
 void AstraDriver::newDepthFrameCallback(sensor_msgs::ImagePtr image)
 {
-  boost::mutex::scoped_lock lock(depth_syncer_.mutex);
-
   if ((++data_skip_depth_counter_)%data_skip_==0)
   {
-
     data_skip_depth_counter_ = 0;
+    boost::mutex::scoped_lock lock(depth_syncer_.mutex);
 
     if (depth_raw_subscribers_ || depth_subscribers_ || projector_info_subscribers_ || depth_syncer_.need_image)
     {
@@ -887,9 +1019,13 @@ void AstraDriver::newDepthFrameCallback(sensor_msgs::ImagePtr image)
       }
       cam_info = getDepthCameraInfo(image->width, image->height, image->header.stamp);
 
-      depth_syncer_.image = image;
-      depth_syncer_.check();
-      depth_syncer_.cv.notify_one();
+      if (depth_syncer_.need_image)
+      {
+        depth_syncer_.image = image;
+        depth_syncer_.check();
+        lock.unlock();
+        depth_syncer_.cv.notify_one();
+      }
 
       if (depth_raw_subscribers_)
       {
@@ -1318,10 +1454,12 @@ void AstraDriver::initDevice()
     try
     {
       std::string device_URI = resolveDeviceURI(device_id_);
-      #if 0
+      #if 1
       if( device_URI == "" ) 
       {
-      	boost::this_thread::sleep(boost::posix_time::milliseconds(500));
+        ROS_INFO("No matching device found... Desired device is: '%s'", device_id_.c_str());
+      	boost::this_thread::sleep(boost::posix_time::milliseconds(10000));
+        ROS_INFO("Waiting 10 seconds for new devices");
       	continue;
       }
       #endif
@@ -1347,6 +1485,13 @@ void AstraDriver::initDevice()
   {
     ROS_DEBUG("Waiting for device initialization..");
     boost::this_thread::sleep(boost::posix_time::milliseconds(100));
+  }
+
+  serial_number_ = device_manager_->getSerial(device_->getUri());
+  ROS_INFO("Driver initialized");
+  if (config_init_){
+    advertiseROSTopics();
+    applyConfigToOpenNIDevice();
   }
 
 }

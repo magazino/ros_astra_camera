@@ -5,7 +5,7 @@
 
 typedef actionlib::SimpleActionClient<camera_control_msgs::GrabImagesAction>
     ActionImageActionClient;
-typedef boost::shared_ptr<ActionImageActionClient> ActionImageActionClientPtr;
+typedef boost::movelib::unique_ptr<ActionImageActionClient> ActionImageActionClientPtr;
 
 class ActionImageClient {
  public:
@@ -22,15 +22,15 @@ class ActionImageClient {
 ActionImageClient::ActionImageClient() : it_(nh_) {
   image_publisher_ = it_.advertise("debug_images", 1);
 
-  action_client_ = boost::make_shared<ActionImageActionClient>(
-      "camera/rgb/grab_images", true);
+  action_client_ = boost::movelib::make_unique<ActionImageActionClient>(
+      "rgb/grab_images", true);
   action_client_->waitForServer();
 }
 
 void ActionImageClient::sendGoal() {
   camera_control_msgs::GrabImagesGoal goal;
-  // goal.exposure_auto = true;
-  goal.exposure_given = true;
+  goal.exposure_auto = true;
+  // goal.exposure_given = true;
   goal.exposure_times.push_back(10);
   goal.exposure_times.push_back(50);
   goal.exposure_times.push_back(100);
