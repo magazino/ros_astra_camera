@@ -254,6 +254,8 @@ private:
 
   bool color_depth_synchronization_;
   bool depth_registration_;
+  bool always_active_rgb_stream_;
+  bool always_active_depth_stream_;
 
   std::map<int, AstraVideoMode> video_modes_lookup_;
 

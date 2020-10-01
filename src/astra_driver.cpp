@@ -491,6 +491,22 @@ void AstraDriver::configCb(Config &config, uint32_t level)
   color_time_offset_ = ros::Duration(config.color_time_offset);
   depth_time_offset_ = ros::Duration(config.depth_time_offset);
 
+  // Call Stream activators whenever the always_active parameters are changed
+  if (config.always_active_rgb_stream != always_active_rgb_stream_)
+  {
+    // keep rgb stream active, regardless of subscribers,
+    // to avoid delays and initialization issues
+    always_active_rgb_stream_ = config.always_active_rgb_stream;
+    imageConnectCb();
+  }
+  if (config.always_active_depth_stream != always_active_depth_stream_)
+  {
+    // keep depth stream active, regardless of subscribers,
+    // to avoid delays and initialization issues
+    always_active_depth_stream_ = config.always_active_depth_stream;
+    depthConnectCb();
+  }
+
   if (lookupVideoModeFromDynConfig(config.ir_mode, ir_video_mode_)<0)
   {
     ROS_ERROR("Undefined IR video mode received from dynamic reconfigure");
@@ -858,7 +874,7 @@ void AstraDriver::imageConnectCb(bool grab_images_client)
   ir_subscribers_ = pub_ir_.getNumSubscribers() > 0;
   color_subscribers_ = pub_color_.getNumSubscribers() > 0;
 
-  if ((color_subscribers_ || grab_images_client) && (!ir_subscribers_ || rgb_preferred_))
+  if ((color_subscribers_ || grab_images_client || always_active_rgb_stream_) && (!ir_subscribers_ || rgb_preferred_))
   {
     if (ir_subscribers_)
       ROS_ERROR("Cannot stream RGB and IR at the same time. Streaming RGB only.");
@@ -878,7 +894,7 @@ void AstraDriver::imageConnectCb(bool grab_images_client)
       device_->startColorStream();
     }
   }
-  else if (ir_subscribers_ && (!color_subscribers_ || !rgb_preferred_))
+  else if (ir_subscribers_ && (!color_subscribers_ || !rgb_preferred_ || !always_active_rgb_stream_))
   {
 
     if (color_subscribers_)
@@ -921,7 +937,7 @@ void AstraDriver::depthConnectCb(bool grab_images_client)
   depth_raw_subscribers_ = pub_depth_raw_.getNumSubscribers() > 0;
   projector_info_subscribers_ = pub_projector_info_.getNumSubscribers() > 0;
 
-  bool need_depth = depth_subscribers_ || depth_raw_subscribers_ || grab_images_client;
+  bool need_depth = depth_subscribers_ || depth_raw_subscribers_ || grab_images_client || always_active_depth_stream_;
 
   if (need_depth && !device_->isDepthStreamStarted())
   {
@@ -959,7 +975,7 @@ void AstraDriver::newColorFrameCallback(sensor_msgs::ImagePtr image)
   {
     data_skip_color_counter_ = 0;
     boost::mutex::scoped_lock lock(color_syncer_.mutex);
-    
+
     if (color_subscribers_ || color_syncer_.need_image)
     {
       image->header.frame_id = color_frame_id_;
