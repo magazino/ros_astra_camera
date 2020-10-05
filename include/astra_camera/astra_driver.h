@@ -69,11 +69,79 @@
 
 #include <ros/ros.h>
 
+#include <actionlib/server/simple_action_server.h>
+#include <camera_control_msgs/GrabImagesAction.h>
+
+#include <diagnostic_updater/diagnostic_updater.h>
+#include <diagnostic_updater/publisher.h>
+
 namespace astra_wrapper
 {
 
+struct CameraParameters
+{
+  int exposure;
+  int gain;
+  bool auto_exposure;
+};
+
+/**
+ * @brief The ActionImageSyncer struct
+ * @note When the change in a parameter of the camera is big, the camera is
+ * slow to react and won't give the desired image. Skipping frames accommodates
+ * for this. Also, keep in mind that the camera is queried about a parameter, it
+ * responds with the set value and not the currently reached one.
+ */
+struct ActionImageSyncer
+{
+  ActionImageSyncer() :
+      num_skip_frames_default(2),
+      frames_skipped(0),
+      need_image(false),
+      acquired(true)
+  {}
+
+  void reset(bool skip_frames)
+  {
+    num_skip_frames = skip_frames ? num_skip_frames_default : 0;
+    frames_skipped = 0;
+    need_image = true;
+    acquired = false;
+  }
+
+  void check()
+  {
+    if (frames_skipped == num_skip_frames)
+    {
+      need_image = false;
+      acquired = true;
+    }
+    else
+    {
+      ++frames_skipped;
+    }
+  }
+
+  bool ready()
+  {
+    return acquired;
+  }
+
+  boost::mutex mutex;
+  boost::condition_variable cv;
+  const size_t num_skip_frames_default;
+  size_t num_skip_frames;
+  size_t frames_skipped;
+  bool need_image;
+  bool acquired;
+  sensor_msgs::ImagePtr image;
+};
+
 class AstraDriver
 {
+  typedef actionlib::SimpleActionServer<camera_control_msgs::GrabImagesAction> ImageActionServer;
+  typedef boost::shared_ptr<ImageActionServer> ImageActionServerPtr;
+
 public:
   AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) ;
   ~AstraDriver();
@@ -101,9 +169,10 @@ private:
   void initDevice();
 
   void advertiseROSTopics();
+  void terminateROSTopics();
 
-  void imageConnectCb();
-  void depthConnectCb();
+  void imageConnectCb(bool grab_images_client = false);
+  void depthConnectCb(bool grab_images_client = false);
 
   bool getSerialCb(astra_camera::GetSerialRequest& req, astra_camera::GetSerialResponse& res);
   bool getDeviceTypeCb(astra_camera::GetDeviceTypeRequest& req, astra_camera::GetDeviceTypeResponse& res);
@@ -139,8 +208,10 @@ private:
   boost::shared_ptr<AstraDevice> device_;
 
   std::string device_id_;
+  std::string device_uri_;
+  std::string serial_number_;
 
-  /** \brief get_serial server*/
+  /** \brief servers*/
   ros::ServiceServer get_camera_info;
   ros::ServiceServer get_serial_server;
   ros::ServiceServer get_device_type_server;
@@ -183,6 +254,8 @@ private:
 
   bool color_depth_synchronization_;
   bool depth_registration_;
+  bool always_active_rgb_stream_;
+  bool always_active_depth_stream_;
 
   std::map<int, AstraVideoMode> video_modes_lookup_;
 
@@ -217,6 +290,27 @@ private:
 
   Config old_config_;
   int uvc_flip_;
+
+  /// Grab images action servers
+  bool validateGrabImagesGoal(const camera_control_msgs::GrabImagesGoalConstPtr& goal);
+  void colorGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr& goal);
+  void depthGrabImagesCallback(const camera_control_msgs::GrabImagesGoalConstPtr& goal);
+
+  CameraParameters getCameraParameters() const;
+  void setCameraParameters(const CameraParameters &parameters);
+
+  ImageActionServerPtr color_action_server_;
+  ImageActionServerPtr depth_action_server_;
+  ActionImageSyncer color_syncer_;
+  ActionImageSyncer depth_syncer_;
+
+  /// Diagnostics
+  diagnostic_updater::Updater diagnostics_updater_;
+  ros::Timer diagnostics_timer_;
+
+  void getAvailabilityDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat);
+  void diagnosticsTimerCallback(const ros::TimerEvent&);
+  
 };
 
 }
