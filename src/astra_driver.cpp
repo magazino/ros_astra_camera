@@ -491,22 +491,6 @@ void AstraDriver::configCb(Config &config, uint32_t level)
   color_time_offset_ = ros::Duration(config.color_time_offset);
   depth_time_offset_ = ros::Duration(config.depth_time_offset);
 
-  // Call Stream activators whenever the always_active parameters are changed
-  if (config.always_active_rgb_stream != always_active_rgb_stream_)
-  {
-    // keep rgb stream active, regardless of subscribers,
-    // to avoid delays and initialization issues
-    always_active_rgb_stream_ = config.always_active_rgb_stream;
-    imageConnectCb();
-  }
-  if (config.always_active_depth_stream != always_active_depth_stream_)
-  {
-    // keep depth stream active, regardless of subscribers,
-    // to avoid delays and initialization issues
-    always_active_depth_stream_ = config.always_active_depth_stream;
-    depthConnectCb();
-  }
-
   if (lookupVideoModeFromDynConfig(config.ir_mode, ir_video_mode_)<0)
   {
     ROS_ERROR("Undefined IR video mode received from dynamic reconfigure");
@@ -540,6 +524,22 @@ void AstraDriver::configCb(Config &config, uint32_t level)
   use_device_time_ = config.use_device_time;
 
   data_skip_ = config.data_skip+1;
+
+  // Call Stream activators whenever the always_active parameters are changed
+  if (config.always_active_rgb_stream != always_active_rgb_stream_)
+  {
+    // keep rgb stream active, regardless of subscribers,
+    // to avoid delays and initialization issues
+    always_active_rgb_stream_ = config.always_active_rgb_stream;
+    imageConnectCb();
+  }
+  if (config.always_active_depth_stream != always_active_depth_stream_)
+  {
+    // keep depth stream active, regardless of subscribers,
+    // to avoid delays and initialization issues
+    always_active_depth_stream_ = config.always_active_depth_stream;
+    depthConnectCb();
+  }
 
   applyConfigToOpenNIDevice();
 
