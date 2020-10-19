@@ -525,6 +525,10 @@ void AstraDriver::configCb(Config &config, uint32_t level)
 
   data_skip_ = config.data_skip+1;
 
+  applyConfigToOpenNIDevice();
+
+  config_init_ = true;
+
   // Call Stream activators whenever the always_active parameters are changed
   if (config.always_active_rgb_stream != always_active_rgb_stream_)
   {
@@ -540,10 +544,6 @@ void AstraDriver::configCb(Config &config, uint32_t level)
     always_active_depth_stream_ = config.always_active_depth_stream;
     depthConnectCb();
   }
-
-  applyConfigToOpenNIDevice();
-
-  config_init_ = true;
 
   old_config_ = config;
 }
