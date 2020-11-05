@@ -1029,11 +1029,12 @@ void AstraDriver::newDepthFrameCallback(sensor_msgs::ImagePtr image)
       if (depth_registration_)
       {
         image->header.frame_id = color_frame_id_;
+        cam_info = getColorCameraInfo(image->width, image->height, image->header.stamp);
       } else
       {
         image->header.frame_id = depth_frame_id_;
+        cam_info = getDepthCameraInfo(image->width, image->height, image->header.stamp);
       }
-      cam_info = getDepthCameraInfo(image->width, image->height, image->header.stamp);
 
       if (depth_syncer_.need_image)
       {
