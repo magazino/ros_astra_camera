@@ -45,7 +45,7 @@ using astra_wrapper::AstraException;
 
 int main(int arc, char** argv)
 {
-  boost::shared_ptr<AstraDeviceManager> manager;
+  boost::shared_ptr<AstraDeviceManager> manager(AstraDeviceManager::getSingelton());
   boost::shared_ptr<std::vector<astra_wrapper::AstraDeviceInfo> > device_infos = manager->getConnectedDeviceInfos();
   std::cout << "Found " << device_infos->size() << " devices:" << std::endl << std::endl;
   for (size_t i = 0; i < device_infos->size(); ++i)
