@@ -45,15 +45,15 @@ using astra_wrapper::AstraException;
 
 int main(int arc, char** argv)
 {
-  astra_wrapper::AstraDeviceManager manager;
-  boost::shared_ptr<std::vector<astra_wrapper::AstraDeviceInfo> > device_infos = manager.getConnectedDeviceInfos();
+  boost::shared_ptr<AstraDeviceManager> manager;
+  boost::shared_ptr<std::vector<astra_wrapper::AstraDeviceInfo> > device_infos = manager->getConnectedDeviceInfos();
   std::cout << "Found " << device_infos->size() << " devices:" << std::endl << std::endl;
   for (size_t i = 0; i < device_infos->size(); ++i)
   {
     std::cout << "Device #" << i << ":" << std::endl;
     std::cout << device_infos->at(i) << std::endl;
     try {
-      std::string serial = manager.getSerial(device_infos->at(i).uri_);
+      std::string serial = manager->getSerial(device_infos->at(i).uri_);
       std::cout << "Serial number: " << serial << std::endl;
     }
     catch (const AstraException& exception)
