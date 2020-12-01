@@ -218,18 +218,19 @@ std::size_t AstraDeviceManager::getNumOfConnectedDevices() const
 
 std::string AstraDeviceManager::getSerial(const std::string& Uri) const
 {
-  boost::shared_ptr<openni::Device> openni_device;
+  openni::Device openni_device;
   std::string ret;
 
   // we need to open the device to query the serial number
   if (Uri.length() > 0) 
   {
-    if (openni_device->open(Uri.c_str()) == openni::STATUS_OK)
+    if (openni_device.open(Uri.c_str()) == openni::STATUS_OK)
     {
     int serial_len = 100;
     char serial[serial_len];
 
-    openni::Status rc = openni_device->getProperty(openni::DEVICE_PROPERTY_SERIAL_NUMBER, serial, &serial_len);
+    openni::Status rc = openni_device.getProperty(openni::DEVICE_PROPERTY_SERIAL_NUMBER, serial, &serial_len);
+    openni_device.close();
     if (rc == openni::STATUS_OK)
       ret = serial;
     else
@@ -239,10 +240,10 @@ std::string AstraDeviceManager::getSerial(const std::string& Uri) const
     }
     else
     {
-      THROW_OPENNI_EXCEPTION("Device open failed: %s", openni::OpenNI::getExtendedError());
+      //THROW_OPENNI_EXCEPTION("Device open failed: %s", openni::OpenNI::getExtendedError());
     }
     // close the device again
-    openni_device->close();
+    openni_device.close();
   }
   return ret;
 }
