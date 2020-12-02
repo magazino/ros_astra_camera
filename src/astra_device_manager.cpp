@@ -216,34 +216,39 @@ std::size_t AstraDeviceManager::getNumOfConnectedDevices() const
   return device_listener_->getNumOfConnectedDevices();
 }
 
+template <class T>
+static void Deallocate(T* factoryObject)
+{
+    factoryObject->mMemoryMgr->Deallocate();
+}
+
 std::string AstraDeviceManager::getSerial(const std::string& Uri) const
 {
-  openni::Device openni_device;
+  boost::shared_ptr<openni::Device> openni_device;
+  openni_device = boost::make_shared<openni::Device>();
   std::string ret;
 
   // we need to open the device to query the serial number
-  if (Uri.length() > 0) 
+  if (Uri.length() > 0 && openni_device->open(Uri.c_str()) == openni::STATUS_OK)
   {
-    if (openni_device.open(Uri.c_str()) == openni::STATUS_OK)
-    {
     int serial_len = 100;
     char serial[serial_len];
 
-    openni::Status rc = openni_device.getProperty(openni::DEVICE_PROPERTY_SERIAL_NUMBER, serial, &serial_len);
-    openni_device.close();
+    openni::Status rc = openni_device->getProperty(openni::DEVICE_PROPERTY_SERIAL_NUMBER, serial, &serial_len);
     if (rc == openni::STATUS_OK)
       ret = serial;
     else
     {
+      openni_device->close();
       THROW_OPENNI_EXCEPTION("Serial number query failed: %s", openni::OpenNI::getExtendedError());
     }
-    }
-    else
-    {
-      //THROW_OPENNI_EXCEPTION("Device open failed: %s", openni::OpenNI::getExtendedError());
-    }
     // close the device again
-    openni_device.close();
+    openni_device->close();
+  }
+  else
+  {
+    openni_device->close();
+    //THROW_OPENNI_EXCEPTION("Device open failed: %s", openni::OpenNI::getExtendedError());
   }
   return ret;
 }
