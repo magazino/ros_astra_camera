@@ -157,8 +157,6 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   diagnostics_updater_.verbose_ = false;
   diagnostics_updater_.setHardwareID("astra_" + serial_number_);
   diagnostics_updater_.add("camera_availability", this, &AstraDriver::getAvailabilityDiagnostic);
-  diagnostics_timer_ =
-      pnh.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
 
   ros::NodeHandle color_nh(nh_, "rgb");
   color_action_server_ = boost::make_shared<ImageActionServer>(
@@ -173,6 +171,11 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
 
 AstraDriver::~AstraDriver() {
   device_->stopAllStreams();
+}
+
+void AstraDriver::createTimer(ros::NodeHandle& n)
+{
+  diagnostics_timer_ = n.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
 }
 
 void AstraDriver::getAvailabilityDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat)

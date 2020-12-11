@@ -145,6 +145,7 @@ class AstraDriver
 public:
   AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) ;
   ~AstraDriver();
+  void createTimer(ros::NodeHandle& n);
 
 private:
   typedef astra_camera::AstraConfig Config;
