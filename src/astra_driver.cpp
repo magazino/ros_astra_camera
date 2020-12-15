@@ -167,15 +167,12 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   depth_action_server_ = boost::make_shared<ImageActionServer>(
       depth_nh, "grab_images", boost::bind(&AstraDriver::depthGrabImagesCallback, this, _1), false);
   depth_action_server_->start();
+
+  diagnostics_timer_ = pnh_.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
 }
 
 AstraDriver::~AstraDriver() {
   device_->stopAllStreams();
-}
-
-void AstraDriver::createTimer(ros::NodeHandle& n)
-{
-  diagnostics_timer_ = n.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
 }
 
 void AstraDriver::getAvailabilityDiagnostic(diagnostic_updater::DiagnosticStatusWrapper &stat)
