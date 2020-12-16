@@ -157,8 +157,6 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   diagnostics_updater_.verbose_ = false;
   diagnostics_updater_.setHardwareID("astra_" + serial_number_);
   diagnostics_updater_.add("camera_availability", this, &AstraDriver::getAvailabilityDiagnostic);
-  diagnostics_timer_ =
-      pnh.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
 
   ros::NodeHandle color_nh(nh_, "rgb");
   color_action_server_ = boost::make_shared<ImageActionServer>(
@@ -169,6 +167,8 @@ AstraDriver::AstraDriver(ros::NodeHandle& n, ros::NodeHandle& pnh) :
   depth_action_server_ = boost::make_shared<ImageActionServer>(
       depth_nh, "grab_images", boost::bind(&AstraDriver::depthGrabImagesCallback, this, _1), false);
   depth_action_server_->start();
+
+  diagnostics_timer_ = pnh_.createTimer(ros::Duration(1), &AstraDriver::diagnosticsTimerCallback, this);
 }
 
 AstraDriver::~AstraDriver() {
