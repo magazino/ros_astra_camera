@@ -256,6 +256,7 @@ private:
   bool depth_registration_;
   bool always_active_rgb_stream_;
   bool always_active_depth_stream_;
+  bool enable_replug_feature_;
 
   std::map<int, AstraVideoMode> video_modes_lookup_;
 

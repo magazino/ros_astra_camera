@@ -194,53 +194,56 @@ void AstraDriver::getAvailabilityDiagnostic(diagnostic_updater::DiagnosticStatus
     stat.summary(DiagnosticStatus::OK, "Device is connected");
   }
 
-  std::string uri;
-
-  // get uri for serial number (changes after losing connection)
-  boost::shared_ptr<std::vector<AstraDeviceInfo> > infos = device_manager_->getConnectedDeviceInfos();
-  for (size_t i = 0; i < infos->size(); ++i)
+  if (enable_replug_feature_) 
   {
-    std::string serial = device_manager_->getSerial((*infos)[i].uri_);
-    ROS_DEBUG("URI: %s, serial: %s", (*infos)[i].uri_.c_str(), serial.c_str());
-    if (serial == serial_number_)
+    std::string uri;
+
+    // get uri for serial number (changes after losing connection)
+    boost::shared_ptr<std::vector<AstraDeviceInfo> > infos = device_manager_->getConnectedDeviceInfos();
+    for (size_t i = 0; i < infos->size(); ++i)
     {
-      uri = (*infos)[i].uri_;
-      break;
+      std::string serial = device_manager_->getSerial((*infos)[i].uri_);
+      ROS_DEBUG("URI: %s, serial: %s", (*infos)[i].uri_.c_str(), serial.c_str());
+      if (serial == serial_number_)
+      {
+        uri = (*infos)[i].uri_;
+        break;
+      }
     }
+
+    if (uri.empty())
+    {
+      ROS_INFO("Could not find uri for serial_number '%s'", serial_number_.c_str());
+      stat.summary(DiagnosticStatus::ERROR, "No Device connected");
+      return;
+    }
+
+    // we have a uri for a camera with the right serial number
+    stat.summary(DiagnosticStatus::OK, "Device is connected");
+
+    if (device_uri_.empty())
+    {
+      // first connection
+      device_uri_ = uri;
+      return;
+    }
+
+    // camera was reconnected and gets an incremented URI
+    if (device_uri_ != uri)
+    {
+      ROS_WARN("DEVICE URI CHANGED from '%s' to '%s'", device_uri_.c_str(), uri.c_str());
+      device_.reset();
+
+      terminateROSTopics();
+      initDevice();
+
+      config_init_ = false;
+      applyConfigToOpenNIDevice();
+      config_init_ = true;
+
+      device_uri_ = uri;
+    } 
   }
-
-  if (uri.empty())
-  {
-    ROS_INFO("Could not find uri for serial_number '%s'", serial_number_.c_str());
-    stat.summary(DiagnosticStatus::ERROR, "No Device connected");
-    return;
-  }
-
-  // we have a uri for a camera with the right serial number
-  stat.summary(DiagnosticStatus::OK, "Device is connected");
-
-  if (device_uri_.empty())
-  {
-    // first connection
-    device_uri_ = uri;
-    return;
-  }
-
-  // camera was reconnected and gets an incremented URI
-  if (device_uri_ != uri)
-  {
-    ROS_WARN("DEVICE URI CHANGED from '%s' to '%s'", device_uri_.c_str(), uri.c_str());
-    device_.reset();
-
-    terminateROSTopics();
-    initDevice();
-
-    config_init_ = false;
-    applyConfigToOpenNIDevice();
-    config_init_ = true;
-
-    device_uri_ = uri;
-  } 
 }
 
 void AstraDriver::diagnosticsTimerCallback(const ros::TimerEvent &)
@@ -544,6 +547,7 @@ void AstraDriver::configCb(Config &config, uint32_t level)
     always_active_depth_stream_ = config.always_active_depth_stream;
     depthConnectCb();
   }
+  enable_replug_feature_ = config.enable_replug_feature;
 
   old_config_ = config;
 }
